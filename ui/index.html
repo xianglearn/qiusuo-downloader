@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>求索下载 · 媒体批量下载工具</title>
+<style>
+:root,
+:root[data-theme="dark"]{
+  --page:#101318; --bg:#181C24; --panel:#1E232E; --panel-2:#262C3A; --panel-3:#2E3545;
+  --border:rgba(255,255,255,.06); --border-strong:rgba(255,255,255,.11); --border-hover:rgba(255,255,255,.16);
+  --ink-1:#EEF1F6; --ink-2:#A8B2C2; --ink-3:#6B7689;
+  --accent:#2FD3C5; --accent-2:#1AB5A8; --accent-soft:rgba(47,211,197,.10); --on-accent:#05100E;
+  --ok:#3FCB86; --ok-soft:rgba(63,203,134,.12); --warn:#E8A33D; --warn-soft:rgba(232,163,61,.14);
+  --bad:#FF6B5A; --bad-soft:rgba(255,107,90,.12); --info:#5E9EFF; --info-soft:rgba(94,158,255,.12);
+  --logo-grad-1:#2FD3C5; --logo-grad-2:#1AB5A8; --logo-grad-3:#0E8A80;
+  --logo-highlight:rgba(255,255,255,.25);
+  --logo-glow:rgba(47,211,197,.4);
+  --r-shell:14px; --r-card:10px; --r-control:7px; --r-pill:999px; --row:42px;
+}
+:root[data-theme="light"]{
+  --page:#F5F7FA; --bg:#FFFFFF; --panel:#F0F2F5; --panel-2:#E8EBF0; --panel-3:#DDE1E8;
+  --border:rgba(0,0,0,.06); --border-strong:rgba(0,0,0,.10); --border-hover:rgba(0,0,0,.15);
+  --ink-1:#1A1D23; --ink-2:#4A5160; --ink-3:#8B93A3;
+  --accent:#0EA5A0; --accent-2:#0D9488; --accent-soft:rgba(14,165,160,.10); --on-accent:#FFFFFF;
+  --ok:#16A34A; --ok-soft:rgba(22,163,74,.12); --warn:#D97706; --warn-soft:rgba(217,119,6,.14);
+  --bad:#DC2626; --bad-soft:rgba(220,38,38,.12); --info:#2563EB; --info-soft:rgba(37,99,235,.12);
+  --logo-grad-1:#0EA5A0; --logo-grad-2:#0D9488; --logo-grad-3:#0F766E;
+  --logo-highlight:rgba(255,255,255,.2);
+  --logo-glow:rgba(14,165,160,.25);
+  --r-shell:14px; --r-card:10px; --r-control:7px; --r-pill:999px; --row:42px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:radial-gradient(1200px 800px at 50% 30%,#14181F 0%,#0A0C10 100%);color:var(--ink-1);font-family:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif;font-size:13.5px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow:auto;min-height:100vh;display:flex;align-items:center;justify-content:center;margin:0;padding:40px 20px;box-sizing:border-box}
+[data-theme="light"] body{background:radial-gradient(1200px 800px at 50% 30%,#E8EBF0 0%,#D5DAE3 100%)}
+.num{font-variant-numeric:tabular-nums}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+input,textarea{font:inherit;color:inherit}
+svg{display:block;flex:none}
+.ic{width:16px;height:16px}.ic-sm{width:14px;height:14px}
+.window{display:flex;flex-direction:column;width:960px;height:640px;background:var(--page);border-radius:14px;overflow:hidden;resize:both;min-width:900px;min-height:600px;max-width:95vw;max-height:95vh;box-shadow:0 24px 64px -16px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.06);position:relative}
+[data-theme="light"] .window{box-shadow:0 24px 64px -16px rgba(0,0,0,.25),0 0 0 1px rgba(0,0,0,.08)}
+.resize-handle{position:absolute;right:4px;bottom:2px;width:14px;height:14px;color:var(--ink-3);opacity:.5;pointer-events:none;z-index:10}
+.titlebar{display:flex;align-items:center;gap:12px;height:44px;padding:0 16px;background:var(--bg);border-bottom:1px solid var(--border);flex:none}
+.brand{display:flex;align-items:center;gap:10px}
+.brand .logo{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,var(--logo-grad-1) 0%,var(--logo-grad-2) 60%,var(--logo-grad-3) 100%);display:grid;place-items:center;box-shadow:0 2px 8px -2px var(--logo-glow),inset 0 1px 0 var(--logo-highlight)}
+.brand .logo svg{width:15px;height:15px;color:var(--on-accent)}
+.brand .name{font-size:14px;font-weight:650}
+.brand .ver{font-size:11.5px;color:var(--ink-3);margin-left:2px}
+.env-status{display:flex;align-items:center;gap:6px;margin-left:8px}
+.env-dot{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 6px var(--ok-soft)}
+.env-label{font-size:11.5px;color:var(--ink-3)}
+.titlebar .sp{flex:1}
+.titlebar .actions{display:flex;align-items:center;gap:4px}
+.icon-btn{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--ink-2);transition:.15s}
+.icon-btn:hover{background:var(--panel-2);color:var(--ink-1)}
+.icon-btn svg{width:15px;height:15px}
+.main{flex:1;display:flex;min-height:0;gap:12px;padding:12px}
+.left-panel{width:360px;display:flex;flex-direction:column;gap:12px;flex:none}
+.right-panel{flex:1;display:flex;flex-direction:column;gap:12px;min-width:0}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+.panel-header{height:42px;padding:0 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);flex:none}
+.panel-title{font-size:13px;font-weight:600}
+.panel-title .count{font-weight:400;color:var(--ink-3);margin-left:4px;font-size:12px}
+.panel-body{flex:1;min-height:0;overflow-y:auto}
+.segment{display:inline-flex;background:var(--panel-2);border-radius:999px;padding:2px;gap:2px}
+.segment button{height:26px;padding:0 12px;border-radius:999px;font-size:12px;color:var(--ink-2);transition:.15s}
+.segment button.on{background:var(--panel-3);color:var(--ink-1)}
+.import-panel .panel-body{padding:12px;display:flex;flex-direction:column;gap:10px}
+.import-textarea{flex:1;min-height:0;background:var(--panel);border:0;outline:0;resize:none;padding:12px 14px;font-size:12.5px;line-height:1.7;color:var(--ink-2);font-family:"SF Mono","Consolas","Menlo",monospace}
+.import-textarea::placeholder{color:var(--ink-3);line-height:1.7}
+.import-actions{display:flex;gap:8px;align-items:center}
+.import-actions .btn{flex:1}
+.btn{height:36px;padding:0 14px;border-radius:7px;background:var(--panel-2);border:1px solid var(--border);color:var(--ink-1);font-size:13px;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:.15s;white-space:nowrap}
+.btn:hover{background:var(--panel-3);border-color:var(--border-hover)}
+.btn:active{background:var(--panel-2)}
+.btn svg{width:15px;height:15px}
+.btn-primary{background:var(--accent);border-color:transparent;color:var(--on-accent);font-weight:600}
+.btn-primary:hover{background:var(--accent-2);border-color:transparent}
+.btn-danger{background:var(--bad-soft);border-color:transparent;color:var(--bad)}
+.btn-danger:hover{opacity:.9}
+.btn-ghost{background:transparent;border-color:transparent;color:var(--ink-2)}
+.btn-ghost:hover{background:var(--panel-2);color:var(--ink-1)}
+.btn-lg{height:42px;padding:0 18px;font-size:13.5px}
+.btn-lg svg{width:16px;height:16px}
+.btn-sm{height:30px;padding:0 10px;font-size:12px}
+.btn-sm svg{width:14px;height:14px}
+.btn-smart{background:var(--accent-soft);border:1px solid var(--accent);color:var(--accent)}
+.btn-smart:hover{background:var(--accent);color:var(--on-accent)}
+.batch-row{display:flex;align-items:center;gap:8px;padding:8px 0}
+.batch-row label{font-size:12.5px;color:var(--ink-2);cursor:pointer;user-select:none}
+.batch-row .sub{font-size:11.5px;color:var(--ink-3);margin-left:4px}
+.checkbox{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--border-strong);background:var(--panel-2);display:inline-flex;align-items:center;justify-content:center;transition:.15s;flex:none}
+.checkbox.on{background:var(--accent);border-color:var(--accent)}
+.checkbox svg{width:11px;height:11px;color:var(--on-accent)}
+.smart-grab-section{padding:0 12px 12px;display:flex;flex-direction:column;align-items:center;gap:0}
+.smart-grab-section .btn-smart{width:100%}
+.task-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.task-table th{text-align:left;font-weight:500;font-size:11.5px;color:var(--ink-3);padding:0 12px;height:36px;border-bottom:1px solid var(--border);background:var(--panel)}
+.task-table td{padding:0 12px;height:42px;border-bottom:1px solid var(--border);vertical-align:middle}
+.task-table tbody tr:hover{background:var(--panel-2)}
+.col-check{width:36px;padding-left:14px!important}
+.col-size{width:80px}
+.col-progress{width:180px}
+.col-speed{width:90px}
+.col-status{width:80px}
+.col-ops{width:70px;text-align:right}
+.task-name{display:flex;align-items:center;gap:10px;min-width:0}
+.file-ic{width:28px;height:28px;border-radius:6px;background:var(--panel-2);display:grid;place-items:center;flex:none}
+.file-ic svg{width:15px;height:15px;color:var(--accent)}
+.file-ic.video svg{color:var(--accent)}
+.task-name .meta{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.task-name .title{font-size:12.5px;color:var(--ink-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.task-name .src{font-size:11px;color:var(--ink-3)}
+.progress{display:flex;align-items:center;gap:8px}
+.progress-bar{flex:1;height:6px;border-radius:999px;background:var(--panel-3);overflow:hidden;min-width:80px}
+.progress-bar i{display:block;height:100%;background:var(--accent);border-radius:999px;transition:.3s width}
+.progress-bar.done i{background:var(--ok)}
+.progress-bar.error i{background:var(--bad)}
+.progress-bar.paused i{background:var(--ink-3)}
+.pct{font-size:11.5px;color:var(--ink-2);width:38px;text-align:right;flex:none}
+.tag{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:999px;font-size:11px;font-weight:500}
+.tag.downloading{background:var(--accent-soft);color:var(--accent)}
+.tag.done{background:var(--ok-soft);color:var(--ok)}
+.tag.waiting{background:var(--panel-3);color:var(--ink-2)}
+.tag.error{background:var(--bad-soft);color:var(--bad)}
+.tag.paused{background:var(--warn-soft);color:var(--warn)}
+.row-ops{display:inline-flex;gap:2px}
+.row-ops button{width:26px;height:26px;border-radius:5px;display:grid;place-items:center;color:var(--ink-3);transition:.15s}
+.row-ops button:hover{background:var(--panel-3);color:var(--ink-1)}
+.row-ops svg{width:14px;height:14px}
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;text-align:center}
+.empty-ic{width:48px;height:48px;border-radius:10px;background:var(--panel-2);display:grid;place-items:center;margin-bottom:12px;color:var(--ink-3)}
+.empty-ic svg{width:24px;height:24px}
+.empty-state b{font-size:13px;color:var(--ink-2);margin-bottom:4px}
+.empty-state p{font-size:12px;color:var(--ink-3);line-height:1.6}
+.bottom{border-top:1px solid var(--border);background:var(--bg);padding:10px 16px 12px;display:flex;flex-direction:column;gap:10px;flex:none}
+.overall-bar{display:flex;align-items:center;gap:12px}
+.overall-bar .label{font-size:12px;color:var(--ink-3);flex:none}
+.overall-bar .track{flex:1;height:6px;border-radius:999px;background:var(--panel-2);overflow:hidden}
+.overall-bar .track i{display:block;height:100%;background:var(--accent);border-radius:999px;transition:.3s width}
+.overall-bar .stats{display:flex;gap:14px;font-size:12px;color:var(--ink-2);flex:none}
+.overall-bar .stats b{color:var(--ink-1);font-weight:600}
+.overall-bar .speed{color:var(--accent);font-weight:500}
+.log-area{height:80px;background:var(--panel);border:1px solid var(--border);border-radius:7px;padding:8px 12px;overflow-y:auto;font-family:"SF Mono","Consolas","Menlo",monospace;font-size:11.5px;line-height:1.8}
+.log-line{display:flex;gap:10px}
+.log-line .time{color:var(--ink-3);flex:none}
+.log-line .msg{color:var(--ink-2)}
+.log-line .msg.ok{color:var(--ok)}
+.log-line .msg.warn{color:var(--warn)}
+.log-line .msg.bad{color:var(--bad)}
+.log-line .msg.info{color:var(--info)}
+.log-line .msg.poem{color:var(--ink-3);font-style:italic;font-size:11px}
+.action-bar{display:flex;align-items:center;gap:10px}
+.action-group{display:flex;gap:6px}
+.action-divider{width:1px;height:24px;background:var(--border)}
+.action-bar .sp{flex:1}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;opacity:0;pointer-events:none;transition:.2s}
+.scrim.on{opacity:1;pointer-events:auto}
+.modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-48%) scale(.96);width:480px;background:var(--page);border:1px solid var(--border);border-radius:14px;padding:24px;z-index:101;opacity:0;pointer-events:none;transition:.2s;box-shadow:0 24px 64px -16px rgba(0,0,0,.6)}
+.modal.on{opacity:1;pointer-events:auto;transform:translate(-50%,-50%) scale(1)}
+.modal h3{font-size:16px;font-weight:650;margin-bottom:4px}
+.modal-sub{font-size:12.5px;color:var(--ink-3);margin-bottom:18px}
+.form-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)}
+.form-row:last-of-type{border-bottom:0}
+.form-row label{width:110px;font-size:12.5px;color:var(--ink-2);flex:none}
+.form-row .val{flex:1;display:flex;align-items:center;gap:10px;min-width:0}
+.path-input{display:flex;align-items:stretch;border:1px solid var(--border);border-radius:7px;overflow:hidden;background:var(--panel)}
+.path-input input{flex:1;background:transparent;border:0;outline:0;padding:0 10px;font-size:12px;color:var(--ink-1);min-width:0}
+.btn-browse{padding:0 12px;background:var(--panel-2);color:var(--ink-2);font-size:11.5px;border-left:1px solid var(--border);transition:.15s}
+.btn-browse:hover{background:var(--panel-3);color:var(--ink-1)}
+.num-input{width:80px;height:30px;border:1px solid var(--border);border-radius:7px;background:var(--panel);padding:0 10px;font-size:12px;color:var(--ink-1);outline:0;transition:.15s}
+.num-input:focus{border-color:var(--accent)}
+.hint{font-size:11.5px;color:var(--ink-3)}
+.switch{width:36px;height:20px;border-radius:999px;background:var(--panel-3);position:relative;cursor:pointer;transition:.2s}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--ink-3);transition:.2s}
+.switch.on{background:var(--accent)}
+.switch.on::after{left:18px;background:var(--on-accent)}
+.modal-acts{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+.toast{position:fixed;top:24px;left:50%;transform:translateX(-50%) translateY(-20px);display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--border);border-radius:999px;padding:10px 18px;font-size:13px;color:var(--ink-1);box-shadow:0 8px 32px -8px rgba(0,0,0,.4);z-index:200;opacity:0;pointer-events:none;transition:.25s}
+.toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast svg{width:16px;height:16px;color:var(--ok)}
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="brand">
+      <div class="logo"><img src="https://aka.doubaocdn.com/s/fpOA9cbDdV" alt="求索下载" style="width:20px;height:20px;object-fit:contain;display:block;"></div>
+      <span class="name">求索下载</span>
+      <span class="ver">v1.0</span>
+    </div>
+    <div class="env-status">
+      <span class="env-dot"></span>
+      <span class="env-label">环境就绪</span>
+    </div>
+    <span class="sp"></span>
+    <div class="actions">
+      <button class="icon-btn" id="themeBtn" title="切换主题"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M216.42,152.88A90,90,0,1,1,103.12,39.58a6,6,0,0,1,7.71,7.36,78,78,0,1,0,105.48,105.49A6,6,0,0,1,216.42,152.88Z"/></svg></button>
+      <button class="icon-btn" id="settingsBtn" title="设置"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M128,90a38,38,0,1,0,38,38A38,38,0,0,0,128,90Zm0,64a26,26,0,1,1,26-26A26,26,0,0,1,128,154Z"/><path d="M230,175.3v-.09l-1.6-1.12-28.29-16.33a8,8,0,0,1-3.91-6.69l-.62-32.3a8,8,0,0,1,1.61-5.11l22.23-26.59a.32.32,0,0,0,.06-.21c0-.12-.07-.27-.14-.42l-1.64-2.82a64.44,64.44,0,0,0-11.24-13.1,71.17,71.17,0,0,0-13.83-9.83l-2.78-1.59c-.11-.07-.27-.13-.42-.19L177,52.27a8,8,0,0,1-4.69-5.61l-5.33-28.17a.4.4,0,0,0-.12-.24c-.1-.17-.24-.36-.4-.55a63,63,0,0,0-39.12,0c-.17.19-.33.38-.43.57a.27.27,0,0,0-.07.22L122,47a8,8,0,0,1-4.63,5.55L89.12,59.42c-.15.05-.28.09-.42.15l-2.78,1.65a69.12,69.12,0,0,0-25,19.93,64.86,64.86,0,0,0-9.84,13l-1.57,2.75a.34.34,0,0,0-.07.22c0,.11.07.23.13.36l22.27,26.37a8,8,0,0,1,1.63,5.08l-.7,32.29a8,8,0,0,1-4,6.82L28.06,174.81c-.14.08-.29.18-.41.32a63,63,0,0,0,33.18,54.49.3.3,0,0,0,.25,0l27.46-16a8,8,0,0,1,6.27-.55l30.95,10.49,0,0,.14,0,.32.08a.31.31,0,0,0,.24,0,63.92,63.92,0,0,0,31.8-13.16,63.2,63.2,0,0,0,22.41-31.39c.1-.27.19-.56.27-.84l-.15-.06ZM145.69,209.13l-30.5-10.34a24,24,0,0,0-22.14,4.71l-20.67,12a48.2,48.2,0,0,1-15.8-13.65l.37-.22,28.29-16.33a24,24,0,0,0,8.84-34l-7.13-12.34a24,24,0,0,0,11.27-32.58l-.59-30.85a47.79,47.79,0,0,1,16.49-3.53,46.83,46.83,0,0,1,16.58,3l-.71,31.39A24,24,0,0,0,143,103.94l-6.38,12.75a24,24,0,0,0,6.93,32.6l28.7,16.56.13.08.31.18a48.33,48.33,0,0,1-27,43Z"/></svg></button>
+    </div>
+  </div>
+  <div class="main">
+    <section class="panel left-panel import-panel">
+      <div class="panel-header">
+        <span class="panel-title">批量导入</span>
+      </div>
+      <div class="panel-body" style="flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;padding:0">
+        <textarea class="import-textarea" placeholder="支持钉钉回放/闪记/群文件，以及 B站、抖音、慕课等 90+ 平台&#10;在此粘贴链接，每行一个；观看密码在下载时按需输入"></textarea>
+        <div style="padding:0 12px 0">
+          <div class="import-actions">
+            <button class="btn" id="importText"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M216 44H40a12 12 0 0 0-12 12v144a12 12 0 0 0 12 12h176a12 12 0 0 0 12-12V56a12 12 0 0 0-12-12Zm4 156a4 4 0 0 1-4 4H40a4 4 0 0 1-4-4V56a4 4 0 0 1 4-4h176a4 4 0 0 1 4 4Z"/><path d="M160 120a8 8 0 0 1 0 16H96a8 8 0 0 1 0-16Zm0-36a8 8 0 0 1 0 16H96a8 8 0 0 1 0-16Zm0 72a8 8 0 0 1 0 16H96a8 8 0 0 1 0-16Z"/></svg>导入文本</button>
+            <button class="btn" id="importQr"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M96,40H48A8,8,0,0,0,40,48V96a8,8,0,0,0,8,8H96a8,8,0,0,0,8-8V48A8,8,0,0,0,96,40Zm-8,48H56V56H88Z"/><path d="M208,40H160a8,8,0,0,0-8,8V96a8,8,0,0,0,8,8h48a8,8,0,0,0,8-8V48A8,8,0,0,0,208,40Zm-8,48H168V56h32Z"/><path d="M96,152H48a8,8,0,0,0-8,8v48a8,8,0,0,0,8,8H96a8,8,0,0,0,8-8V160A8,8,0,0,0,96,152Zm-8,48H56V168H88Z"/><path d="M136,136h-16a8,8,0,0,0,0,16h8v8a8,8,0,0,0,16,0v-8h8a8,8,0,0,0,0-16h-8v-8A8,8,0,0,0,136,136Z"/><path d="M216,144a8,8,0,0,0-8,8v16h-16a8,8,0,0,0,0,16h16v16h-16a8,8,0,0,0,0,16h16a8,8,0,0,0,8-8V152A8,8,0,0,0,216,144Z"/><path d="M160,136a8,8,0,0,0-8,8v64a8,8,0,0,0,8,8h16a8,8,0,0,0,8-8V144A8,8,0,0,0,176,136Zm0,72V152h16v56Z"/></svg>导入二维码</button>
+            <button class="btn btn-ghost" id="clearInput" title="清空"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/></svg></button>
+          </div>
+          <div class="batch-row" id="batchCheckWrap">
+            <span class="checkbox on" id="batchCheck"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></svg></span>
+            <label for="batchCheck">批量采集<span class="sub">多平台采集项</span></label>
+          </div>
+        </div>
+        <div class="smart-grab-section">
+          <button class="btn btn-smart" id="smartGrab"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm64-88a8,8,0,0,1-8,8H128a8,8,0,0,1-8-8V72a8,8,0,0,1,16,0v48h48A8,8,0,0,1,192,128Z"/></svg>一键批量采集</button>
+          <p style="font-size:11px;color:var(--ink-3);text-align:center;margin-top:6px;margin-bottom:0">自动批量采集当前群直播页，按群名保存。</p>
+        </div>
+      </div>
+    </section>
+    <section class="panel right-panel">
+      <div class="panel-header">
+        <span class="panel-title">任务列表<span class="count" id="taskTotal">3</span></span>
+        <span class="sp" style="flex:1"></span>
+        <div class="segment" id="filterSeg">
+          <button class="on" data-filter="all">全部</button>
+          <button data-filter="downloading">下载中</button>
+          <button data-filter="done">已完成</button>
+          <button data-filter="waiting">等待中</button>
+        </div>
+        <button class="btn btn-sm" id="selectAll"><span class="checkbox on" id="allCheck"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></svg></span>全选</button>
+      </div>
+      <div class="panel-body" id="taskBody"></div>
+    </section>
+  </div>
+  <div class="bottom">
+    <div class="overall-bar">
+      <span class="label">总进度</span>
+      <div class="track"><i id="overallTrack" style="width:45%"></i></div>
+      <div class="stats"><span><b id="doneCount" class="num">1</b> / <b id="totalCount" class="num">3</b> 完成</span><span class="speed num" id="overallSpeed">2.4 MB/s</span></div>
+    </div>
+    <div class="log-area" id="logArea">
+      <div class="log-line"><span class="time">[14:53:41]</span><span class="msg ok">当前已是最新版本 v1.0</span></div>
+      <div class="log-line"><span class="time">[14:53:38]</span><span class="msg">环境检测完成：GoDingtalk ✓ MediaGo ✓ FFmpeg ✓</span></div>
+      <div class="log-line"><span class="time">[14:53:35]</span><span class="msg">求索下载已加载</span></div>
+      <div class="log-line"><span class="msg poem">路漫漫其修远兮，吾将上下而求索。</span></div>
+    </div>
+    <div class="action-bar">
+      <div class="action-group">
+        <button class="btn btn-primary btn-lg" id="startBtn"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M232.4,114.49,88.32,26.35a16,16,0,0,0-16.2-.3A15.86,15.86,0,0,0,64,39.87V216.13A15.94,15.94,0,0,0,80,232a16.07,16.07,0,0,0,8.36-2.35L232.4,141.51a15.81,15.81,0,0,0,0-27ZM80,215.94V40l143.83,88Z"/></svg>开始下载</button>
+        <button class="btn btn-danger btn-lg" id="stopBtn"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M200,40H56A16,16,0,0,0,40,56V200a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,160H56V56H200V200Z"/></svg>停止</button>
+      </div>
+      <div class="action-divider"></div>
+      <div class="action-group">
+        <button class="btn" id="parseBtn"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z"/></svg>解析到任务列表</button>
+        <button class="btn" id="openDirBtn"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M216,72H131.31L104,44.69A15.86,15.86,0,0,0,92.69,40H40A16,16,0,0,0,24,56V200.62A15.4,15.4,0,0,0,39.38,216H216.89A15.13,15.13,0,0,0,232,200.89V88A16,16,0,0,0,216,72ZM40,56H92.69l16,16H40ZM216,200H40V88H216Z"/></svg>打开保存目录</button>
+      </div>
+      <span class="sp"></span>
+      <div class="action-group">
+        <button class="btn btn-ghost" id="reloginBtn"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M141.66,133.66l-40,40a8,8,0,0,1-11.32-11.32L116.69,136H24a8,8,0,0,1,0-16h92.69L90.34,93.66a8,8,0,0,1,11.32-11.32l40,40A8,8,0,0,1,141.66,133.66ZM200,32H136a8,8,0,0,0,0,16h56V208H136a8,8,0,0,0,0,16h64a8,8,0,0,0,8-8V40A8,8,0,0,0,200,32Z"/></svg>重新登录</button>
+        <button class="btn btn-ghost" id="updateBtn"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M224,48V96a8,8,0,0,1-8,8H168a8,8,0,0,1,0-16h28.69L182.06,73.37a79.56,79.56,0,0,0-56.13-23.43h-.45A79.52,79.52,0,0,0,69.59,72.71,8,8,0,0,1,58.41,61.27a96,96,0,0,1,135,.79L208,76.69V48a8,8,0,0,1,16,0ZM186.41,183.29a80,80,0,0,1-112.47-.66L59.31,168H88a8,8,0,0,0,0-16H40a8,8,0,0,0-8,8v48a8,8,0,0,1,16,0V179.31l14.63,14.63A95.43,95.43,0,0,0,130,222.06h.53a95.36,95.36,0,0,0,67.07-27.33,8,8,0,0,0-11.18-11.44Z"/></svg>检查更新</button>
+      </div>
+    </div>
+  </div>
+  <svg class="resize-handle" viewBox="0 0 256 256" fill="currentColor"><path d="M224,152a8,8,0,0,1-8,8H168a8,8,0,0,1,0-16h48A8,8,0,0,1,224,152Zm0,40a8,8,0,0,1-8,8H168a8,8,0,0,1,0-16h48A8,8,0,0,1,224,192Zm-40-40a8,8,0,0,1-8,8H120a8,8,0,0,1,0-16h56A8,8,0,0,1,184,152Zm0,40a8,8,0,0,1-8,8H120a8,8,0,0,1,0-16h56A8,8,0,0,1,184,192Zm-40-40a8,8,0,0,1-8,8H72a8,8,0,0,1,0-16h64A8,8,0,0,1,144,152Zm0,40a8,8,0,0,1-8,8H72a8,8,0,0,1,0-16h64A8,8,0,0,1,144,192Z"/></svg>
+</div>
+<div class="scrim" id="scrim"></div>
+<div class="modal" id="settingsModal">
+  <h3>下载设置</h3><p class="modal-sub">调整下载行为与保存选项</p>
+  <div class="form-row"><label>默认保存目录</label><div class="val"><div class="path-input" style="flex:1"><input type="text" value="F:\资料库\求索下载\video" style="height:30px;font-size:12px"><button class="btn-browse" style="height:30px;font-size:11.5px">浏览</button></div></div></div>
+  <div class="form-row"><label>分片线程数</label><div class="val"><input class="num-input" type="text" value="10" style="height:30px"><span class="hint">数字越大占用网络和磁盘资源越多</span></div></div>
+  <div class="form-row"><label>同时下载数</label><div class="val"><input class="num-input" type="text" value="2" style="height:30px"><span class="hint">建议 2-3，过多可能触发限流</span></div></div>
+  <div class="form-row"><label>下载完成提示</label><div class="val"><div class="switch on" id="notifySwitch"></div><span class="hint">全部任务完成后弹出通知</span></div></div>
+  <div class="form-row"><label>自动检查更新</label><div class="val"><div class="switch on" id="autoUpdateSwitch"></div></div></div>
+  <div class="modal-acts"><button class="btn" data-close>取消</button><button class="btn btn-primary" data-close>保存设置</button></div>
+</div>
+<div class="toast" id="toast"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></svg><span id="toastMsg">操作成功</span></div>
+<script>
+const tasks=[
+  {id:1,name:"产品周会回放_20260920",src:"群回放 · 产品研发群",size:"248 MB",progress:100,status:"done",speed:""},
+  {id:2,name:"季度复盘会议录像",src:"群回放 · 管理层季度会",size:"1.2 GB",progress:62,status:"downloading",speed:"2.4 MB/s"},
+  {id:3,name:"新人培训直播回放",src:"直播短链 · HR培训",size:"856 MB",progress:0,status:"waiting",speed:""},
+];
+const statusMap={downloading:{label:"下载中",cls:"downloading"},done:{label:"已完成",cls:"done"},waiting:{label:"等待中",cls:"waiting"},error:{label:"失败",cls:"error"},paused:{label:"已暂停",cls:"paused"}};
+function renderTasks(filter="all"){
+  const body=document.getElementById("taskBody");
+  const filtered=filter==="all"?tasks:tasks.filter(t=>t.status===filter);
+  if(filtered.length===0){body.innerHTML='<div class="empty-state"><div class="empty-ic"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40ZM40,56H216V88H40Zm0,144V104H216v96Z"/></svg></div><b>暂无'+(filter==="all"?"":statusMap[filter]?.label||"")+'任务</b><p>在左侧粘贴钉钉链接，点击「解析到任务列表」即可开始下载</p></div>';return;}
+  body.innerHTML='<table class="task-table"><thead><tr><th class="col-check"></th><th>文件名</th><th class="col-size">大小</th><th class="col-progress">进度</th><th class="col-speed">速度</th><th class="col-status">状态</th><th class="col-ops"></th></tr></thead><tbody>'+filtered.map(t=>{const st=statusMap[t.status];const barCls=t.status==="done"?"done":t.status==="error"?"error":t.status==="paused"?"paused":"";return '<tr><td class="col-check"><span class="checkbox on"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"/></svg></span></td><td><div class="task-name"><div class="file-ic video"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M251.77,73a8,8,0,0,0-8.21.39L208,97.05V72a16,16,0,0,0-16-16H32A16,16,0,0,0,16,72V184a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V159l35.56,23.71A8,8,0,0,0,248,184a8,8,0,0,0,8-8V80A8,8,0,0,0,251.77,73ZM192,184H32V72H192V184Zm48-22.95-32-21.33V116.28L240,95Z"/></svg></div><div class="meta"><span class="title">'+t.name+'</span><span class="src">'+t.src+'</span></div></div></td><td class="col-size num">'+t.size+'</td><td class="col-progress"><div class="progress"><div class="progress-bar '+barCls+'"><i style="width:'+t.progress+'%"></i></div><span class="pct num">'+t.progress+'%</span></div></td><td class="col-speed num">'+(t.speed||"—")+'</td><td class="col-status"><span class="tag '+st.cls+'">'+st.label+'</span></td><td class="col-ops"><div class="row-ops"><button title="打开文件"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M216,72H131.31L104,44.69A15.86,15.86,0,0,0,92.69,40H40A16,16,0,0,0,24,56V200.62A15.4,15.4,0,0,0,39.38,216H216.89A15.13,15.13,0,0,0,232,200.89V88A16,16,0,0,0,216,72ZM40,56H92.69l16,16H40ZM216,200H40V88H216Z"/></svg></button><button title="删除"><svg viewBox="0 0 256 256" fill="currentColor"><path d="M216,48H176V40a24,24,0,0,0-24-24H104A24,24,0,0,0,80,40v8H40a8,8,0,0,0,0,16h8V208a16,16,0,0,0,16,16H192a16,16,0,0,0,16-16V64h8a8,8,0,0,0,0-16ZM96,40a8,8,0,0,1,8-8h48a8,8,0,0,1,8,8v8H96Zm96,168H64V64H192ZM112,104v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Zm48,0v64a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z"/></svg></button></div></td></tr>';}).join("")+'</tbody></table>';
+}
+renderTasks();updateOverall();
+document.getElementById("logArea").scrollTop=document.getElementById("logArea").scrollHeight;
+function updateOverall(){const done=tasks.filter(t=>t.status==="done").length;const total=tasks.length;const avg=Math.round(tasks.reduce((s,t)=>s+t.progress,0)/total);document.getElementById("doneCount").textContent=done;document.getElementById("totalCount").textContent=total;document.getElementById("taskTotal").textContent=total;document.getElementById("overallTrack").style.width=avg+"%";}
+document.querySelectorAll("#filterSeg button").forEach(b=>{b.onclick=()=>{document.querySelectorAll("#filterSeg button").forEach(x=>x.classList.remove("on"));b.classList.add("on");renderTasks(b.dataset.filter);};});
+document.getElementById("selectAll").onclick=()=>{const c=document.getElementById("allCheck");c.classList.toggle("on");showToast(c.classList.contains("on")?"已全选所有任务":"已取消全选");};
+let downloading=false;
+document.getElementById("startBtn").onclick=()=>{if(downloading){showToast("任务已在下载中");return;}downloading=true;addLog("开始下载任务：季度复盘会议录像","ok");showToast("已开始下载");const task=tasks.find(t=>t.status==="downloading");if(task){const timer=setInterval(()=>{task.progress+=2;if(task.progress>=100){task.progress=100;task.status="done";task.speed="";clearInterval(timer);downloading=false;addLog("季度复盘会议录像 下载完成","ok");showToast("下载完成：季度复盘会议录像");}renderTasks(document.querySelector("#filterSeg button.on").dataset.filter);updateOverall();},300);}};
+document.getElementById("stopBtn").onclick=()=>{downloading=false;const task=tasks.find(t=>t.status==="downloading");if(task){task.status="paused";task.speed="";}renderTasks();addLog("下载已暂停","warn");showToast("已暂停下载");};
+document.getElementById("parseBtn").onclick=()=>{const ta=document.querySelector(".import-textarea");if(!ta.value.trim()){showToast("请先粘贴下载链接");return;}addLog("解析链接完成，已添加 1 个任务","ok");showToast("已解析到任务列表");};
+document.getElementById("openDirBtn").onclick=()=>showToast("已打开保存目录");
+document.getElementById("reloginBtn").onclick=()=>{addLog("正在跳转钉钉授权登录…","");showToast("正在打开登录页面");};
+document.getElementById("updateBtn").onclick=()=>{addLog("当前已是最新版本 v1.0","ok");showToast("当前已是最新版本");};
+document.getElementById("importText").onclick=()=>{document.querySelector(".import-textarea").value="https://dingtalk.com/live/xxxxxx\nhttps://dingtalk.com/group/playback/yyyyyy";showToast("已导入文本链接");};
+document.getElementById("importQr").onclick=()=>showToast("请选择二维码图片");
+document.getElementById("clearInput").onclick=()=>{document.querySelector(".import-textarea").value="";showToast("已清空输入");};
+document.getElementById("batchCheckWrap").addEventListener("click",function(e){e.preventDefault();document.getElementById("batchCheck").classList.toggle("on");});
+document.getElementById("smartGrab").onclick=()=>{addLog("正在扫描已打开的钉钉群回放页面…","");setTimeout(()=>{addLog("发现 2 个已加载的群回放，已按群名保存","ok");showToast("已获取 2 个群回放链接");},800);};
+const scrim=document.getElementById("scrim"),modal=document.getElementById("settingsModal");
+function openModal(on){scrim.classList.toggle("on",on);modal.classList.toggle("on",on);}
+document.getElementById("themeBtn").onclick=()=>{const cur=document.documentElement.getAttribute("data-theme")||"dark";const next=cur==="dark"?"light":"dark";document.documentElement.setAttribute("data-theme",next);showToast(next==="light"?"已切换到浅色主题":"已切换到深色主题");};
+document.getElementById("settingsBtn").onclick=()=>openModal(true);
+scrim.onclick=()=>openModal(false);
+document.querySelectorAll("[data-close]").forEach(b=>b.onclick=()=>openModal(false));
+document.querySelectorAll(".switch").forEach(s=>{s.onclick=()=>s.classList.toggle("on");});
+function addLog(msg,type=""){const area=document.getElementById("logArea");const now=new Date();const t="["+String(now.getHours()).padStart(2,"0")+":"+String(now.getMinutes()).padStart(2,"0")+":"+String(now.getSeconds()).padStart(2,"0")+"]";const line=document.createElement("div");line.className="log-line";line.innerHTML='<span class="time">'+t+'</span><span class="msg '+type+'">'+msg+'</span>';area.appendChild(line);area.scrollTop=area.scrollHeight;}
+let toastTimer;
+function showToast(msg){const t=document.getElementById("toast");document.getElementById("toastMsg").textContent=msg;t.classList.add("on");clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove("on"),2000);}
+</script>
+</body>
+</html>
