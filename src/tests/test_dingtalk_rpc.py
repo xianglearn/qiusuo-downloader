@@ -1,0 +1,241 @@
+import json
+import tempfile
+import unittest
+import os
+import ssl
+from unittest import mock
+import dingtalk_rpc as rpc
+import websocket
+from pathlib import Path
+
+from dingtalk_rpc import (
+    DingTalkAuthenticationError,
+    DingTalkRpcError,
+    LIST_RECORDS_URI,
+    list_live_records,
+    probe_dingtalk_session,
+)
+
+
+TEST_CID = "10000000004"
+
+
+def _record(index, cid=TEST_CID):
+    return {
+        "cid": cid,
+        "fromRoomId": f"room{index:03d}",
+        "liveUuid": f"live-{index:03d}",
+        "title": f"回放 {index}",
+        "datetime": 1000 + index,
+    }
+
+
+class _FakeSocket:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.sent = []
+        self.closed = False
+
+    def send(self, value):
+        self.sent.append(json.loads(value))
+
+    def recv(self):
+        if not self.responses:
+            raise RuntimeError("no response")
+        return json.dumps(self.responses.pop(0))
+
+    def close(self):
+        self.closed = True
+
+
+class DingTalkRpcTests(unittest.TestCase):
+    def test_direct_tls_ignores_proxy_without_mutating_environment(self):
+        raw, tls, result = mock.Mock(), mock.Mock(), mock.Mock()
+        context = mock.Mock()
+        context.wrap_socket.return_value = tls
+        with mock.patch.dict(os.environ, {"HTTPS_PROXY": "http://127.0.0.1:1"}), mock.patch.object(websocket, "create_connection", return_value=result) as connect, mock.patch.object(rpc.network_socket, "create_connection", return_value=raw) as tcp, mock.patch.object(rpc.ssl, "create_default_context", return_value=context):
+            self.assertIs(rpc._connect_dingtalk_websocket(rpc.LWP_URL, timeout=4, cookie="private"), result)
+            self.assertEqual(os.environ["HTTPS_PROXY"], "http://127.0.0.1:1")
+        tcp.assert_called_once_with(("webalfa-cm3.dingtalk.com", 443), timeout=4)
+        context.wrap_socket.assert_called_once_with(raw, server_hostname="webalfa-cm3.dingtalk.com")
+        self.assertEqual(connect.call_args.kwargs["socket"], tls)
+        self.assertEqual(connect.call_args.kwargs["redirect_limit"], 0)
+        tls.close.assert_not_called()
+
+    def test_direct_tls_failure_closes_socket_and_does_not_expose_credentials(self):
+        raw = mock.Mock()
+        context = mock.Mock()
+        context.wrap_socket.side_effect = ssl.SSLCertVerificationError("private_cookie")
+        with mock.patch.object(websocket, "create_connection", side_effect=AssertionError("proxy route must not be used")), mock.patch.object(rpc.network_socket, "create_connection", return_value=raw), mock.patch.object(rpc.ssl, "create_default_context", return_value=context):
+            with self.assertRaisesRegex(DingTalkRpcError, "证书") as raised:
+                rpc._connect_dingtalk_websocket(rpc.LWP_URL)
+        raw.close.assert_called_once()
+        self.assertNotIn("private_cookie", str(raised.exception))
+        self.assertNotIn("proxy", str(raised.exception).lower())
+
+    def test_failed_direct_handshake_closes_tls_without_retry(self):
+        raw, tls, context = mock.Mock(), mock.Mock(), mock.Mock()
+        context.wrap_socket.return_value = tls
+        with mock.patch.object(websocket, "create_connection", side_effect=websocket.WebSocketTimeoutException("secret")) as connect, mock.patch.object(rpc.network_socket, "create_connection", return_value=raw), mock.patch.object(rpc.ssl, "create_default_context", return_value=context):
+            with self.assertRaisesRegex(DingTalkRpcError, "超时"):
+                rpc._connect_dingtalk_websocket(rpc.LWP_URL)
+        self.assertEqual(connect.call_count, 1)
+        tls.close.assert_called_once()
+
+    def test_registration_denial_is_never_retried_as_transport_failure(self):
+        fake = _FakeSocket([{"headers": {"mid": "0"}, "code": 401}])
+        with tempfile.TemporaryDirectory() as root, mock.patch.object(websocket, "create_connection", return_value=fake) as connect:
+            with self.assertRaises(DingTalkAuthenticationError):
+                probe_dingtalk_session(self._cookies(root))
+        self.assertEqual(connect.call_count, 1)
+        self.assertTrue(fake.closed)
+
+    def _cookies(self, root):
+        path = Path(root) / "cookies.json"
+        path.write_text(
+            json.dumps({"account": "token-value", "deviceid": "device-value", "other": "x"}),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_lists_all_numeric_end_pages_and_preserves_titles(self):
+        cid = TEST_CID
+        responses = [
+            {"headers": {"mid": "0 0"}, "code": 200},
+            {"headers": {"mid": "5101001 0"}, "body": [{"records": [_record(i) for i in range(10)], "isEnd": 0}]},
+            {"headers": {"mid": "5101002 0"}, "body": {"records": [_record(i) for i in range(10, 18)], "isEnd": 1}},
+        ]
+        fake = _FakeSocket(responses)
+        calls = []
+
+        def factory(*args, **kwargs):
+            calls.append((args, kwargs))
+            return fake
+
+        with tempfile.TemporaryDirectory() as root:
+            records = list_live_records(cid, self._cookies(root), websocket_factory=factory)
+
+        self.assertEqual(len(records), 18)
+        self.assertEqual(records[-1].title, "回放 17")
+        self.assertEqual(records[-1].timestamp, 1017)
+        self.assertTrue(fake.closed)
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn("token-value", str(calls[0][0]))
+        requests = [item for item in fake.sent if item.get("lwp") == LIST_RECORDS_URI]
+        self.assertEqual([item["body"][0]["index"] for item in requests], [0, 10])
+        self.assertEqual({item["body"][0]["cid"] for item in requests}, {cid})
+
+    def test_accepts_new_record_aliases_without_losing_title(self):
+        raw = _record(7)
+        raw.pop("cid")
+        raw.pop("fromRoomId")
+        raw.pop("liveUuid")
+        raw["conversationId"] = TEST_CID
+        raw["roomID"] = "room007"
+        raw["liveUUID"] = "live-007"
+        fake = _FakeSocket(
+            [
+                {"headers": {"mid": "0 0"}, "code": 200},
+                {
+                    "headers": {"mid": "5101001 0"},
+                    "body": {"records": [raw], "isEnd": 1},
+                },
+            ]
+        )
+        with tempfile.TemporaryDirectory() as root:
+            records = list_live_records(
+                TEST_CID,
+                self._cookies(root),
+                websocket_factory=lambda *args, **kwargs: fake,
+            )
+
+        self.assertEqual(records[0].room_id, "room007")
+        self.assertEqual(records[0].live_uuid, "live-007")
+        self.assertEqual(records[0].title, "回放 7")
+
+    def test_session_probe_only_registers_and_closes(self):
+        fake = _FakeSocket([{"headers": {"mid": "0 0"}, "code": 200}])
+        with tempfile.TemporaryDirectory() as root:
+            probe_dingtalk_session(
+                self._cookies(root),
+                websocket_factory=lambda *args, **kwargs: fake,
+            )
+        self.assertEqual([item["lwp"] for item in fake.sent], ["/reg"])
+        self.assertTrue(fake.closed)
+
+    def test_session_probe_classifies_rejected_registration(self):
+        fake = _FakeSocket([{"headers": {"mid": "0 0"}, "code": 401}])
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaisesRegex(DingTalkAuthenticationError, "已过期"):
+                probe_dingtalk_session(
+                    self._cookies(root),
+                    websocket_factory=lambda *args, **kwargs: fake,
+                )
+
+    def test_session_probe_classifies_connection_failure_without_auth_prompt(self):
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaisesRegex(DingTalkRpcError, "无法连接") as raised:
+                probe_dingtalk_session(
+                    self._cookies(root),
+                    websocket_factory=lambda *args, **kwargs: (_ for _ in ()).throw(
+                        OSError("offline")
+                    ),
+                )
+        self.assertNotIsInstance(raised.exception, DingTalkAuthenticationError)
+
+    def test_decodes_account_token_for_registration(self):
+        fake = _FakeSocket([
+            {"headers": {"mid": "0 0"}, "code": 200},
+            {"headers": {"mid": "5101001 0"}, "body": {"records": [_record(1)], "isEnd": 1}},
+        ])
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "cookies.json"
+            path.write_text(
+                json.dumps({"account": "encoded%2Btoken", "deviceid": "device-value"}),
+                encoding="utf-8",
+            )
+            list_live_records(TEST_CID, path, websocket_factory=lambda *a, **k: fake)
+        self.assertEqual(fake.sent[0]["headers"]["token"], "encoded+token")
+
+    def test_rejects_short_nonterminal_page(self):
+        fake = _FakeSocket([
+            {"headers": {"mid": "0 0"}, "code": 200},
+            {"headers": {"mid": "5101001 0"}, "body": {"records": [_record(1)], "isEnd": 0}},
+        ])
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaisesRegex(DingTalkRpcError, "尚未完整"):
+                list_live_records(TEST_CID, self._cookies(root), websocket_factory=lambda *a, **k: fake)
+
+    def test_rejects_record_from_another_group(self):
+        fake = _FakeSocket([
+            {"headers": {"mid": "0 0"}, "code": 200},
+            {"headers": {"mid": "5101001 0"}, "body": {"records": [_record(1, "other")], "isEnd": 1}},
+        ])
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaisesRegex(DingTalkRpcError, "目标群不一致"):
+                list_live_records(TEST_CID, self._cookies(root), websocket_factory=lambda *a, **k: fake)
+
+    def test_rejects_duplicate_live_or_room_ids(self):
+        record = _record(1)
+        fake = _FakeSocket([
+            {"headers": {"mid": "0 0"}, "code": 200},
+            {"headers": {"mid": "5101001 0"}, "body": {"records": [record, dict(record)], "isEnd": 1}},
+        ])
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaisesRegex(DingTalkRpcError, "重复"):
+                list_live_records(TEST_CID, self._cookies(root), websocket_factory=lambda *a, **k: fake)
+
+    def test_rejects_missing_cookie_material(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "cookies.json"
+            path.write_text(json.dumps({"deviceid": "device"}), encoding="utf-8")
+            with self.assertRaisesRegex(DingTalkRpcError, "账号令牌"):
+                list_live_records(TEST_CID, path, websocket_factory=lambda *a, **k: None)
+
+    def test_rejects_invalid_cid_before_opening_cookie_file(self):
+        with self.assertRaisesRegex(DingTalkRpcError, "群聊 ID"):
+            list_live_records("bad cid", Path("missing.json"), websocket_factory=lambda *a, **k: None)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,415 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Read-only DingTalk LWP calls used by the replay collector."""
+
+from __future__ import annotations
+
+import json
+import re
+import socket as network_socket
+import ssl
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from urllib.parse import unquote, urlparse
+
+from dingtalk_titles import extract_replay_title
+
+
+LWP_URL = "wss://webalfa-cm3.dingtalk.com/long"
+LIVE_APP_KEY = "5b46698304b45807569d343fcc5a2b61"
+PC_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.5359.125 Safari/537.36 "
+    "dingtalk-win/1.0.0 nw(0.14.7) DingTalk(7.8.10-Release.250724002) "
+    "Mojo/1.0.0 Native AppType(release) Channel/201200 Architecture/x86_64"
+)
+LIST_RECORDS_URI = "/r/Adaptor/LiveRecord/listLiveRecords"
+CID_RE = re.compile(r"[A-Za-z0-9_-]{1,160}")
+ID_RE = re.compile(r"[A-Za-z0-9_-]{1,200}")
+
+
+class DingTalkRpcError(RuntimeError):
+    """A read-only DingTalk RPC request could not be validated."""
+
+
+class DingTalkAuthenticationError(DingTalkRpcError):
+    """The local session was structurally valid but DingTalk rejected it."""
+
+
+@dataclass(frozen=True)
+class RpcReplayRecord:
+    cid: str
+    room_id: str
+    live_uuid: str
+    title: str
+    timestamp: int = 0
+
+
+def _load_cookie_values(path: Path) -> Dict[str, str]:
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DingTalkRpcError("钉钉登录会话文件无法读取") from exc
+    if not isinstance(payload, dict):
+        raise DingTalkRpcError("钉钉登录会话文件格式无效")
+    values = {
+        str(name).strip(): str(value)
+        for name, value in payload.items()
+        if str(name).strip() and isinstance(value, (str, int, float)) and str(value)
+    }
+    if not (values.get("account") or values.get("access_token")):
+        raise DingTalkRpcError("钉钉登录会话缺少账号令牌")
+    if not values.get("deviceid"):
+        raise DingTalkRpcError("钉钉登录会话缺少设备标识")
+    return values
+
+
+def _message_mid(message: Mapping[str, Any]) -> str:
+    headers = message.get("headers")
+    if isinstance(headers, Mapping):
+        value = str(headers.get("mid") or "").strip()
+        if value:
+            return value.split()[0]
+    return str(message.get("mid") or "").strip().split(" ", 1)[0]
+
+
+def _status_code(message: Mapping[str, Any]) -> int:
+    for key in ("code", "status"):
+        value = message.get(key)
+        try:
+            if value is not None:
+                return int(value)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _decode_message(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", "replace")
+    try:
+        value = json.loads(str(raw))
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise DingTalkRpcError("钉钉返回了无法识别的数据") from exc
+    if not isinstance(value, dict):
+        raise DingTalkRpcError("钉钉返回的数据格式无效")
+    return value
+
+
+def _receive_for_mid(socket: Any, mid: str, limit: int = 100) -> Dict[str, Any]:
+    for _ in range(limit):
+        message = _decode_message(socket.recv())
+        if _message_mid(message) == mid:
+            code = _status_code(message)
+            if code not in {0, 200}:
+                raise DingTalkRpcError("钉钉只读接口请求失败")
+            return message
+    raise DingTalkRpcError("钉钉只读接口响应超时")
+
+
+def _response_body(message: Mapping[str, Any]) -> Dict[str, Any]:
+    body: Any = message.get("body", message)
+    if isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise DingTalkRpcError("钉钉回放列表格式无效") from exc
+    if isinstance(body, list) and len(body) == 1:
+        body = body[0]
+    if not isinstance(body, dict):
+        raise DingTalkRpcError("钉钉回放列表格式无效")
+    return body
+
+
+def _ended(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or "").strip().lower() in {"1", "true", "yes"}
+
+
+def _timestamp(record: Mapping[str, Any]) -> int:
+    for key in (
+        "datetime",
+        "timestamp",
+        "startTime",
+        "start_time",
+        "actualStartTime",
+        "liveStartTime",
+        "createTime",
+        "gmtCreate",
+    ):
+        try:
+            value = int(_record_value(record, key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if value:
+            return value
+    return 0
+
+
+def _record_value(record: Mapping[str, Any], *names: str) -> Any:
+    """Read a record field across old/new RPC casing and alias spellings."""
+
+    for name in names:
+        if name in record and record[name] not in (None, ""):
+            return record[name]
+    wanted = {re.sub(r"[^a-z0-9]", "", name.casefold()) for name in names}
+    for key, value in record.items():
+        token = re.sub(r"[^a-z0-9]", "", str(key).casefold())
+        if token in wanted and value not in (None, ""):
+            return value
+    return ""
+
+
+def _record_title(record: Mapping[str, Any]) -> str:
+    return extract_replay_title(record) or ""
+
+
+def _parse_page(body: Mapping[str, Any], cid: str) -> tuple[List[RpcReplayRecord], bool]:
+    raw_records = body.get("records")
+    if not isinstance(raw_records, list):
+        raise DingTalkRpcError("钉钉回放列表缺少记录")
+    records: List[RpcReplayRecord] = []
+    for raw in raw_records:
+        if not isinstance(raw, Mapping):
+            raise DingTalkRpcError("钉钉回放记录格式无效")
+        record_cid = str(
+            _record_value(raw, "cid", "conversationId", "groupId", "chatId")
+            or ""
+        ).strip()
+        room_id = str(
+            _record_value(raw, "fromRoomId", "roomId", "roomID", "sourceRoomId")
+            or ""
+        ).strip()
+        live_uuid = str(
+            _record_value(raw, "liveUuid", "liveUUID", "liveId", "uuid") or ""
+        ).strip()
+        if record_cid != cid or not ID_RE.fullmatch(room_id) or not ID_RE.fullmatch(live_uuid):
+            raise DingTalkRpcError("钉钉回放记录与目标群不一致")
+        records.append(
+            RpcReplayRecord(
+                cid=record_cid,
+                room_id=room_id,
+                live_uuid=live_uuid,
+                title=_record_title(raw),
+                timestamp=_timestamp(raw),
+            )
+        )
+    return records, _ended(body.get("isEnd"))
+
+
+def _cookie_connection_material(cookies_path: Path) -> tuple[str, str]:
+    cookies = _load_cookie_values(Path(cookies_path))
+    token = (
+        unquote(cookies["account"])
+        if cookies.get("account")
+        else str(cookies.get("access_token") or "").strip()
+    )
+    cookie_header = "; ".join(f"{name}={value}" for name, value in cookies.items())
+    return token, cookie_header
+
+
+def _websocket_factory(factory: Optional[Callable[..., Any]]) -> Callable[..., Any]:
+    if factory is not None:
+        return factory
+    try:
+        import websocket
+    except ImportError as exc:
+        raise DingTalkRpcError("缺少钉钉只读接口组件") from exc
+    return _connect_dingtalk_websocket
+
+
+def _network_failure_message(error: Exception) -> str:
+    """Do not expose URLs, cookies or proxy credentials from library errors."""
+    if isinstance(error, ssl.SSLCertVerificationError):
+        return "钉钉连接的 TLS 证书验证失败，请检查系统日期、根证书或安全软件的 HTTPS 检查"
+    if isinstance(error, network_socket.gaierror):
+        return "无法解析钉钉接口域名，请检查 DNS 或网络连接"
+    if isinstance(error, (TimeoutError, network_socket.timeout)) or "Timeout" in type(error).__name__:
+        return "连接钉钉接口超时，请检查网络、防火墙或代理服务"
+    if isinstance(error, ConnectionRefusedError):
+        return "钉钉接口或代理连接被拒绝，请确认代理已启动或关闭无效代理"
+    if "Proxy" in type(error).__name__:
+        return "钉钉代理连接失败，请检查代理地址、端口及认证设置"
+    return "无法连接钉钉接口，请检查网络、代理或防火墙设置"
+
+
+def _connect_dingtalk_websocket(url: str, *, timeout: float = 8.0, **options):
+    """Open the DingTalk validation socket with verified TLS and no proxy.
+
+    The login checker must not inherit a stale HTTP(S) proxy from a customer's
+    shell or security tool. A preconnected TLS socket is passed to
+    websocket-client because websocket-client 1.8 does not reliably disable
+    environment proxy discovery when ``http_proxy_host`` is omitted. The
+    system environment is never modified, so update requests keep normal
+    routing.
+    """
+    import websocket
+
+    if url != LWP_URL:
+        raise DingTalkRpcError("不支持的钉钉接口地址")
+    options = dict(options)
+    options["redirect_limit"] = 0
+    network_errors = (OSError, websocket.WebSocketException)
+    host = urlparse(url).hostname
+    stream = None
+    try:
+        stream = network_socket.create_connection((host, 443), timeout=timeout)
+        stream = ssl.create_default_context().wrap_socket(stream, server_hostname=host)
+        return websocket.create_connection(url, timeout=timeout, socket=stream, **options)
+    except ssl.SSLCertVerificationError as exc:
+        if stream is not None:
+            stream.close()
+        raise DingTalkRpcError(_network_failure_message(exc)) from None
+    except network_errors as exc:
+        if stream is not None:
+            stream.close()
+        raise DingTalkRpcError(_network_failure_message(exc)) from None
+    except Exception:
+        if stream is not None:
+            stream.close()
+        raise DingTalkRpcError("钉钉直连初始化失败，请检查系统网络组件") from None
+
+
+def _registration_payload(token: str) -> str:
+    return json.dumps(
+        {
+            "lwp": "/reg",
+            "headers": {
+                "app-key": LIVE_APP_KEY,
+                "token": token,
+                "ua": PC_USER_AGENT,
+                "mid": "0 0",
+            },
+        },
+        separators=(",", ":"),
+    )
+
+
+def probe_dingtalk_session(
+    cookies_path: Path,
+    *,
+    websocket_factory: Optional[Callable[..., Any]] = None,
+    timeout: float = 8.0,
+) -> None:
+    """Verify that DingTalk accepts the saved session without reading group data."""
+
+    token, cookie_header = _cookie_connection_material(Path(cookies_path))
+    factory = _websocket_factory(websocket_factory)
+    socket = None
+    try:
+        socket = factory(
+            LWP_URL,
+            timeout=timeout,
+            cookie=cookie_header,
+            header=[f"User-Agent: {PC_USER_AGENT}"],
+        )
+        socket.send(_registration_payload(token))
+        for _ in range(100):
+            message = _decode_message(socket.recv())
+            if _message_mid(message) != "0":
+                continue
+            if _status_code(message) not in {0, 200}:
+                raise DingTalkAuthenticationError("登录会话已过期或被钉钉拒绝")
+            return
+        raise DingTalkRpcError("钉钉登录校验响应超时")
+    except DingTalkAuthenticationError:
+        raise
+    except DingTalkRpcError:
+        raise
+    except Exception as exc:
+        raise DingTalkRpcError(f"无法连接钉钉登录校验接口：{_network_failure_message(exc)}") from None
+    finally:
+        if socket is not None:
+            try:
+                socket.close()
+            except Exception:
+                pass
+
+
+def list_live_records(
+    cid: str,
+    cookies_path: Path,
+    *,
+    websocket_factory: Optional[Callable[..., Any]] = None,
+    timeout: float = 20.0,
+) -> Sequence[RpcReplayRecord]:
+    """Read every finished replay page for one CID using the logged-in session."""
+
+    cid = str(cid or "").strip()
+    if not CID_RE.fullmatch(cid):
+        raise DingTalkRpcError("群聊 ID 格式无效")
+    token, cookie_header = _cookie_connection_material(Path(cookies_path))
+    websocket_factory = _websocket_factory(websocket_factory)
+
+    socket = None
+    try:
+        socket = websocket_factory(
+            LWP_URL,
+            timeout=timeout,
+            cookie=cookie_header,
+            header=[f"User-Agent: {PC_USER_AGENT}"],
+        )
+        socket.send(_registration_payload(token))
+        _receive_for_mid(socket, "0")
+
+        all_records: List[RpcReplayRecord] = []
+        for page_number, index in enumerate(range(0, 1000, 10), start=1):
+            mid = str(5101000 + page_number)
+            socket.send(
+                json.dumps(
+                    {
+                        "lwp": LIST_RECORDS_URI,
+                        "headers": {"mid": f"{mid} 0"},
+                        "body": [
+                            {
+                                "needNotice": False,
+                                "cid": cid,
+                                "index": index,
+                                "count": 10,
+                            }
+                        ],
+                    },
+                    separators=(",", ":"),
+                )
+            )
+            page, is_end = _parse_page(_response_body(_receive_for_mid(socket, mid)), cid)
+            if not is_end and len(page) != 10:
+                raise DingTalkRpcError("钉钉回放分页尚未完整返回")
+            if len(page) > 10:
+                raise DingTalkRpcError("钉钉回放分页数量异常")
+            all_records.extend(page)
+            if is_end:
+                break
+        else:
+            raise DingTalkRpcError("钉钉回放分页数量异常")
+
+        if not all_records:
+            raise DingTalkRpcError("当前群没有可下载的已结束回放")
+        live_ids = {item.live_uuid for item in all_records}
+        room_ids = {item.room_id for item in all_records}
+        if len(live_ids) != len(all_records) or len(room_ids) != len(all_records):
+            raise DingTalkRpcError("钉钉回放分页存在重复记录")
+        return tuple(all_records)
+    except DingTalkRpcError:
+        raise
+    except Exception as exc:
+        raise DingTalkRpcError("无法连接钉钉只读接口") from exc
+    finally:
+        if socket is not None:
+            try:
+                socket.close()
+            except Exception:
+                pass
+
+
+__all__ = [
+    "DingTalkAuthenticationError",
+    "DingTalkRpcError",
+    "RpcReplayRecord",
+    "list_live_records",
+    "probe_dingtalk_session",
+]
