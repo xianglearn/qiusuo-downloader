@@ -25,6 +25,8 @@ dist/
 *.spec.bak
 
 # 外部引擎可执行文件（体积大且需单独获取，不入库）
-src/GoDingtalk*.exe
-src/mediago.exe
-src/ffmpeg.exe
+*.exe
+GoDingtalk*
+mediago*
+ffmpeg*
+!bin/引擎下载说明.md
